@@ -631,9 +631,8 @@ impl PkgMetadata {
             None
         };
 
-        // Extract all PFS_FILE entries in parallel using pread (read_at)
+        // Extract all PFS_FILE entries in parallel (each worker opens its own File cursor for cross-platform thread safety)
         use rayon::prelude::*;
-        use std::os::unix::fs::FileExt;
 
         let pfs_image_offset = self.header.pfs_image_offset;
         let file_size = self.file_size;
@@ -654,6 +653,7 @@ impl PkgMetadata {
                 pb.set_message(entry.name.clone());
             }
 
+            let mut pkg_reader = File::open(pkg_path)?;
             let out_file = File::create(out_path)?;
             let mut writer = BufWriter::with_capacity(256 * 1024, out_file);
 
@@ -676,7 +676,8 @@ impl PkgMetadata {
                 let read_pos = file_offset - previous_data as u64;
                 let read_len = pfsc_buf_size.min((file_size.saturating_sub(read_pos)) as usize);
                 pfsc_buf.fill(0);
-                file.read_exact_at(&mut pfsc_buf[..read_len], read_pos)?;
+                pkg_reader.seek(SeekFrom::Start(read_pos))?;
+                pkg_reader.read_exact(&mut pfsc_buf[..read_len])?;
 
                 decrypt_pfs(
                     &data_key,
